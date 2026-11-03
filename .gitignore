@@ -1,0 +1,12 @@
+# Temporary directory
+.tmp/
+
+# Build artifacts
+dist/
+
+# Test portable runtimes
+.protable-test/
+portable/
+
+# System
+.DS_Store
