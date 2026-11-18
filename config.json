@@ -1,0 +1,17 @@
+{
+  "hostname": "nas",
+  "state_dir": "state",
+  "control_url": "",
+  "ports": "445",
+  "target": "",
+  "users": [
+    {
+      "name": "user1",
+      "auth_key": ""
+    },
+    {
+      "name": "user2",
+      "auth_key": ""
+    }
+  ]
+}
