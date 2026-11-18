@@ -8,6 +8,247 @@ import (
 	"time"
 )
 
+func TestLoadConfigMultiUserAndStateIsolation(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+	rawJSON := `{
+  "hostname": "my-nas",
+  "state_dir": "custom-state",
+  "control_url": "https://headscale.example.com",
+  "verbose": true,
+  "ports": "445, 80, 443",
+  "target": "",
+  "users": [
+    {"name": "alice", "auth_key": "tskey-auth-alice"},
+    {"name": "bob", "auth_key": "", "control_url": "https://other.example.com", "ports": 8080, "target": "192.168.1.10"}
+  ]
+}`
+	if err := os.WriteFile(cfgPath, []byte(rawJSON), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	resolved, err := LoadConfig(cfgPath, dir)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if resolved.Hostname != "my-nas" {
+		t.Fatalf("expected hostname my-nas, got %q", resolved.Hostname)
+	}
+	wantStateRoot := filepath.Join(dir, "custom-state")
+	if resolved.StateRoot != wantStateRoot {
+		t.Fatalf("expected state root %q, got %q", wantStateRoot, resolved.StateRoot)
+	}
+	if !resolved.Verbose {
+		t.Fatalf("expected verbose=true")
+	}
+	if len(resolved.Users) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(resolved.Users))
+	}
+
+	alice := resolved.Users[0]
+	if alice.Name != "alice" || alice.AuthKey != "tskey-auth-alice" {
+		t.Fatalf("unexpected alice: %+v", alice)
+	}
+	if alice.ControlURL != "https://headscale.example.com" {
+		t.Fatalf("expected alice to inherit global control_url, got %q", alice.ControlURL)
+	}
+	if alice.StateDir != filepath.Join(wantStateRoot, "alice") {
+		t.Fatalf("unexpected alice state dir: %q", alice.StateDir)
+	}
+	if len(alice.Forwards) != 3 ||
+		alice.Forwards[0] != (ForwardRule{Port: 445, Target: "127.0.0.1:445"}) ||
+		alice.Forwards[1] != (ForwardRule{Port: 80, Target: "127.0.0.1:80"}) ||
+		alice.Forwards[2] != (ForwardRule{Port: 443, Target: "127.0.0.1:443"}) {
+		t.Fatalf("unexpected alice forwards: %+v", alice.Forwards)
+	}
+
+	bob := resolved.Users[1]
+	if bob.Name != "bob" || bob.AuthKey != "" {
+		t.Fatalf("unexpected bob: %+v", bob)
+	}
+	if bob.ControlURL != "https://other.example.com" {
+		t.Fatalf("expected bob control_url override, got %q", bob.ControlURL)
+	}
+	if bob.StateDir != filepath.Join(wantStateRoot, "bob") {
+		t.Fatalf("unexpected bob state dir: %q", bob.StateDir)
+	}
+	if len(bob.Forwards) != 1 || bob.Forwards[0].Port != 8080 || bob.Forwards[0].Target != "192.168.1.10:8080" {
+		t.Fatalf("unexpected bob forwards: %+v", bob.Forwards)
+	}
+	if alice.StateDir == bob.StateDir {
+		t.Fatalf("state dirs must be distinct: %q", alice.StateDir)
+	}
+
+	// Ensure config.json is not modified on load.
+	afterBytes, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config after load: %v", err)
+	}
+	if string(afterBytes) != rawJSON {
+		t.Fatalf("config file was mutated during LoadConfig")
+	}
+}
+
+func TestLoadConfigNumericAndTargetOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+	rawJSON := `{
+  "hostname": "nas",
+  "ports": 445,
+  "users": [
+    {"name": "u1"},
+    {"name": "u2", "target": "192.168.1.20"}
+  ]
+}`
+	if err := os.WriteFile(cfgPath, []byte(rawJSON), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	resolved, err := LoadConfig(cfgPath, dir)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if got := resolved.Users[0].Forwards[0]; got != (ForwardRule{Port: 445, Target: "127.0.0.1:445"}) {
+		t.Fatalf("unexpected u1 forward: %+v", got)
+	}
+	if got := resolved.Users[1].Forwards[0]; got != (ForwardRule{Port: 445, Target: "192.168.1.20:445"}) {
+		t.Fatalf("unexpected u2 forward: %+v", got)
+	}
+}
+
+func TestResolveConfigValidationErrors(t *testing.T) {
+	baseDir := t.TempDir()
+
+	tests := []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "empty users",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users:    nil,
+			},
+		},
+		{
+			name: "empty user name",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users:    []UserConfig{{Name: "  "}},
+			},
+		},
+		{
+			name: "duplicate user name case insensitive",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users: []UserConfig{
+					{Name: "Alice"},
+					{Name: "alice"},
+				},
+			},
+		},
+		{
+			name: "path traversal user name",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users:    []UserConfig{{Name: "../evil"}},
+			},
+		},
+		{
+			name: "slash in user name",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users:    []UserConfig{{Name: "a/b"}},
+			},
+		},
+		{
+			name: "leading dot in user name",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users:    []UserConfig{{Name: ".hidden"}},
+			},
+		},
+		{
+			name: "space in user name",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445",
+				Users:    []UserConfig{{Name: "user 1"}},
+			},
+		},
+		{
+			name: "omitted ports",
+			cfg: Config{
+				Hostname: "nas",
+				Target:   "127.0.0.1:445",
+				Users:    []UserConfig{{Name: "user1"}},
+			},
+		},
+		{
+			name: "empty port entry in list",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "445,",
+				Users:    []UserConfig{{Name: "user1"}},
+			},
+		},
+		{
+			name: "port out of range",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "70000",
+				Users:    []UserConfig{{Name: "user1"}},
+			},
+		},
+		{
+			name: "port zero rejected",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "0",
+				Users:    []UserConfig{{Name: "user1"}},
+			},
+		},
+		{
+			name: "port zero numeric rejected",
+			cfg: Config{
+				Hostname: "nas",
+				Ports:    "0",
+				Users:    []UserConfig{{Name: "user1"}},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := resolveConfig(tc.cfg, baseDir); err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestRepoTemplateConfigValid(t *testing.T) {
+	portableDir := t.TempDir()
+	cfgPath := filepath.Join("..", "config.json")
+	resolved, err := LoadConfig(cfgPath, portableDir)
+	if err != nil {
+		t.Fatalf("repo template config.json should be valid: %v", err)
+	}
+	if resolved.Hostname == "" {
+		t.Fatalf("expected non-empty hostname")
+	}
+	if len(resolved.Users) < 1 {
+		t.Fatalf("expected at least 1 user in template config.json")
+	}
+}
+
 func TestNormalizeTarget(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -15,310 +256,90 @@ func TestNormalizeTarget(t *testing.T) {
 		fallbackPort int
 		want         string
 	}{
-		{
-			name:         "empty target",
-			rawTarget:    "",
-			fallbackPort: 445,
-			want:         "127.0.0.1:445",
-		},
-		{
-			name:         "port only",
-			rawTarget:    "8080",
-			fallbackPort: 445,
-			want:         "127.0.0.1:8080",
-		},
-		{
-			name:         "host only",
-			rawTarget:    "192.168.1.100",
-			fallbackPort: 445,
-			want:         "192.168.1.100:445",
-		},
-		{
-			name:         "host with port",
-			rawTarget:    "192.168.1.100:8443",
-			fallbackPort: 445,
-			want:         "192.168.1.100:8443",
-		},
-		{
-			name:         "ipv6 with brackets and port",
-			rawTarget:    "[::1]:8080",
-			fallbackPort: 445,
-			want:         "[::1]:8080",
-		},
-		{
-			name:         "ipv6 bracketed without port",
-			rawTarget:    "[::1]",
-			fallbackPort: 445,
-			want:         "[::1]:445",
-		},
-		{
-			name:         "ipv6 raw without brackets or port",
-			rawTarget:    "::1",
-			fallbackPort: 445,
-			want:         "[::1]:445",
-		},
-		{
-			name:         "colon port only",
-			rawTarget:    ":9000",
-			fallbackPort: 445,
-			want:         ":9000",
-		},
-		{
-			name:         "all ports empty target",
-			rawTarget:    "",
-			fallbackPort: 0,
-			want:         "127.0.0.1",
-		},
-		{
-			name:         "all ports host only",
-			rawTarget:    "192.168.1.100",
-			fallbackPort: 0,
-			want:         "192.168.1.100",
-		},
-		{
-			name:         "all ports ipv6 bracketed",
-			rawTarget:    "[::1]",
-			fallbackPort: 0,
-			want:         "::1",
-		},
-		{
-			name:         "all ports host with zero port",
-			rawTarget:    "127.0.0.1:0",
-			fallbackPort: 0,
-			want:         "127.0.0.1",
-		},
-		{
-			name:         "all ports fixed target",
-			rawTarget:    "192.168.1.100:8080",
-			fallbackPort: 0,
-			want:         "192.168.1.100:8080",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeTarget(tt.rawTarget, tt.fallbackPort)
-			if got != tt.want {
-				t.Errorf("normalizeTarget(%q, %d) = %q, want %q", tt.rawTarget, tt.fallbackPort, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveForwardTarget(t *testing.T) {
-	tests := []struct {
-		name             string
-		normalizedTarget string
-		dstPort          int
-		want             string
-	}{
-		{
-			name:             "ipv4 host",
-			normalizedTarget: "127.0.0.1",
-			dstPort:          445,
-			want:             "127.0.0.1:445",
-		},
-		{
-			name:             "ipv6 host",
-			normalizedTarget: "::1",
-			dstPort:          8080,
-			want:             "[::1]:8080",
-		},
-		{
-			name:             "fixed host and port",
-			normalizedTarget: "192.168.1.100:9000",
-			dstPort:          8080,
-			want:             "192.168.1.100:9000",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := resolveForwardTarget(tt.normalizedTarget, tt.dstPort)
-			if got != tt.want {
-				t.Errorf("resolveForwardTarget(%q, %d) = %q, want %q", tt.normalizedTarget, tt.dstPort, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveStateDir(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gtsa-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Case 1: Brand new directory defaults to primary <portableDir>/tailscaled
-	got := resolveStateDir(tmpDir)
-	want := filepath.Join(tmpDir, "tailscaled")
-	if got != want {
-		t.Errorf("resolveStateDir for fresh dir = %q, want %q", got, want)
-	}
-
-	// Case 2: Existing primary directory
-	if err := os.Mkdir(want, 0700); err != nil {
-		t.Fatal(err)
-	}
-	got = resolveStateDir(tmpDir)
-	if got != want {
-		t.Errorf("resolveStateDir for existing primary = %q, want %q", got, want)
-	}
-
-	// Case 3: Legacy directory fallback when primary does not exist
-	legacyParent, err := os.MkdirTemp("", "gtsa-legacy-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(legacyParent)
-
-	legacyDir := filepath.Join(legacyParent, "tailscale")
-	if err := os.Mkdir(legacyDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	got = resolveStateDir(legacyParent)
-	if got != legacyDir {
-		t.Errorf("resolveStateDir for legacy dir = %q, want %q", got, legacyDir)
-	}
-}
-
-func TestLoadSaveConfig(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gtsa-cfg-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	cfgPath := filepath.Join(tmpDir, "config.json")
-	initialCfg := Config{
-		Port:       "445",
-		Target:     "127.0.0.1:445",
-		Hostname:   "gtsa-445",
-		AuthKey:    "tskey-auth-dummy",
-		ControlURL: "https://controlplane.tailscale.com",
-		Verbose:    true,
-	}
-
-	saveConfig(cfgPath, initialCfg)
-
-	loadedCfg := loadConfig(cfgPath)
-	if loadedCfg.Port != initialCfg.Port ||
-		loadedCfg.Target != initialCfg.Target ||
-		loadedCfg.Hostname != initialCfg.Hostname ||
-		loadedCfg.AuthKey != initialCfg.AuthKey ||
-		loadedCfg.ControlURL != initialCfg.ControlURL ||
-		loadedCfg.Verbose != initialCfg.Verbose {
-		t.Errorf("loadConfig mismatch: got %+v, want %+v", loadedCfg, initialCfg)
-	}
-
-	multiCfg := Config{
-		Port:     "80,443",
-		Target:   "127.0.0.1",
-		Hostname: "gtsa-80-443",
-	}
-	saveConfig(cfgPath, multiCfg)
-	loadedMulti := loadConfig(cfgPath)
-	if loadedMulti.Port != multiCfg.Port || loadedMulti.Target != multiCfg.Target || loadedMulti.Hostname != multiCfg.Hostname {
-		t.Errorf("loadConfig multi-port mismatch: got %+v, want %+v", loadedMulti, multiCfg)
-	}
-}
-
-func TestParsePorts(t *testing.T) {
-	tests := []struct {
-		name    string
-		spec    string
-		want    []int
-		wantErr bool
-	}{
-		{name: "empty defaults to all", spec: "", want: []int{0}},
-		{name: "zero all ports", spec: "0", want: []int{0}},
-		{name: "single port", spec: "445", want: []int{445}},
-		{name: "multiple ports", spec: "80,443,8080", want: []int{80, 443, 8080}},
-		{name: "multiple ports with spaces", spec: " 80 , 443 , 8080 ", want: []int{80, 443, 8080}},
-		{name: "deduplicate ports preserving order", spec: "443,80,443", want: []int{443, 80}},
-		{name: "trailing comma error", spec: "80,", wantErr: true},
-		{name: "empty middle segment error", spec: "80,,443", wantErr: true},
-		{name: "zero combined with port error", spec: "0,80", wantErr: true},
-		{name: "out of range high", spec: "80,70000", wantErr: true},
-		{name: "negative port", spec: "-1", wantErr: true},
-		{name: "non numeric", spec: "80,abc", wantErr: true},
+		{name: "empty target", rawTarget: "", fallbackPort: 445, want: "127.0.0.1:445"},
+		{name: "port only", rawTarget: "8080", fallbackPort: 445, want: "127.0.0.1:8080"},
+		{name: "host only", rawTarget: "192.168.1.100", fallbackPort: 445, want: "192.168.1.100:445"},
+		{name: "host with port", rawTarget: "192.168.1.100:8443", fallbackPort: 445, want: "192.168.1.100:8443"},
+		{name: "ipv6 with brackets and port", rawTarget: "[::1]:8080", fallbackPort: 445, want: "[::1]:8080"},
+		{name: "ipv6 bracketed without port", rawTarget: "[::1]", fallbackPort: 445, want: "[::1]:445"},
+		{name: "ipv6 raw without brackets or port", rawTarget: "::1", fallbackPort: 445, want: "[::1]:445"},
+		{name: "colon port only", rawTarget: ":9090", fallbackPort: 445, want: ":9090"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parsePorts(tc.spec)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("parsePorts(%q) expected error, got %v", tc.spec, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parsePorts(%q) unexpected error: %v", tc.spec, err)
-			}
-			if len(got) != len(tc.want) {
-				t.Fatalf("parsePorts(%q) = %v, want %v", tc.spec, got, tc.want)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Fatalf("parsePorts(%q) = %v, want %v", tc.spec, got, tc.want)
-				}
+			got := normalizeTarget(tc.rawTarget, tc.fallbackPort)
+			if got != tc.want {
+				t.Errorf("normalizeTarget(%q, %d) = %q, want %q", tc.rawTarget, tc.fallbackPort, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestDefaultHostname(t *testing.T) {
-	if got := defaultHostname([]int{0}); got != "gtsa-all" {
-		t.Errorf("defaultHostname([0]) = %q, want %q", got, "gtsa-all")
-	}
-	if got := defaultHostname([]int{445}); got != "gtsa-445" {
-		t.Errorf("defaultHostname([445]) = %q, want %q", got, "gtsa-445")
-	}
-	if got := defaultHostname([]int{80, 443}); got != "gtsa-80-443" {
-		t.Errorf("defaultHostname([80, 443]) = %q, want %q", got, "gtsa-80-443")
-	}
-	many := make([]int, 20)
-	for i := range many {
-		many[i] = 10000 + i
-	}
-	if got := defaultHostname(many); got != "gtsa-multi" {
-		t.Errorf("defaultHostname(many) = %q, want %q", got, "gtsa-multi")
-	}
-}
-
 func TestIsTempDir(t *testing.T) {
-	if !isTempDir(filepath.Join("Z:", "project", ".tmp", "bin")) {
-		t.Errorf("isTempDir should return true for paths with .tmp")
+	if !isTempDir("/tmp/go-build123") {
+		t.Error("expected /tmp/go-build123 to be detected as temp dir")
 	}
-
-	sysTemp := os.TempDir()
-	if sysTemp != "" && !isTempDir(sysTemp) {
-		t.Errorf("isTempDir should return true for os.TempDir(): %q", sysTemp)
+	if !isTempDir("/Users/mod/workspace/goTailscaleApp/.tmp/bin") {
+		t.Error("expected .tmp path to be detected as temp dir")
 	}
-
-	if isTempDir(filepath.Join("Z:", "Users", "mod", "workspace", "portforwar-gotsnet")) {
-		t.Errorf("isTempDir should return false for normal workspace path")
+	if isTempDir("/opt/gtsa-portable") {
+		t.Error("did not expect /opt/gtsa-portable to be detected as temp dir")
 	}
 }
 
 func TestPipeBridge(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer c1.Close()
-	defer c2.Close()
+	c1a, c1b := net.Pipe()
+	c2a, c2b := net.Pipe()
 
 	done := make(chan struct{})
 	go func() {
-		pipeBridge(c1, c2)
+		pipeBridge(c1b, c2a)
 		close(done)
 	}()
 
-	// Since net.Pipe in-memory conn does not support half-close, closing c1 should finish pipeBridge.
-	_ = c1.Close()
+	msg1 := []byte("hello-target")
+	msg2 := []byte("hello-client")
+
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := c1a.Write(msg1)
+		errCh <- err
+	}()
+	go func() {
+		buf := make([]byte, len(msg1))
+		_, err := c2b.Read(buf)
+		if err == nil && string(buf) != string(msg1) {
+			t.Errorf("got %q, want %q", buf, msg1)
+		}
+		_, wErr := c2b.Write(msg2)
+		if wErr != nil {
+			errCh <- wErr
+			return
+		}
+		errCh <- err
+	}()
+
+	buf2 := make([]byte, len(msg2))
+	if _, err := c1a.Read(buf2); err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+	if string(buf2) != string(msg2) {
+		t.Fatalf("got %q, want %q", buf2, msg2)
+	}
+
+	_ = c1a.Close()
+	_ = c2b.Close()
 
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("pipeBridge did not terminate after connection close")
+	case <-time.After(2 * time.Second):
+		t.Fatal("pipeBridge did not exit after closing endpoints")
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("goroutine error: %v", err)
+		}
 	}
 }

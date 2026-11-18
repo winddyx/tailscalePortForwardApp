@@ -1,0 +1,16 @@
+[Unit]
+Description=gtsa Tailscale Multi-User Port Forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/gtsa
+ExecStart=/opt/gtsa/gtsa -config /opt/gtsa/config.json
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,18 @@
 {
-  "port": 445,
+  "hostname": "nas",
+  "state_dir": "state",
+  "control_url": "",
+  "verbose": false,
+  "ports": "445",
   "target": "",
-  "hostname": ""
+  "users": [
+    {
+      "name": "user1",
+      "auth_key": ""
+    },
+    {
+      "name": "user2",
+      "auth_key": ""
+    }
+  ]
 }

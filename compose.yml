@@ -1,0 +1,10 @@
+services:
+  gtsa:
+    image: docker.1ms.run/library/alpine:3.24.4
+    container_name: gtsa
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: ["/app/gtsa", "-config", "/app/config.json"]
