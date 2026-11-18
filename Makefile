@@ -1,4 +1,4 @@
-APP_NAME := gtsa
+APP_NAME := tspfa
 DIST_DIR := dist
 TMP_DIR := $(CURDIR)/.tmp
 
@@ -32,7 +32,7 @@ dist:
 	$(MAKE) dist-linux-arm64
 	$(MAKE) dist-windows-amd64
 	cp config.json $(DIST_DIR)/config.json
-	cp gtsa.service $(DIST_DIR)/gtsa.service
+	cp tspfa.service $(DIST_DIR)/tspfa.service
 	cp compose.yml $(DIST_DIR)/compose.yml
 	@cd $(DIST_DIR) && shasum -a 256 $(APP_NAME)-* > SHA256SUMS
 

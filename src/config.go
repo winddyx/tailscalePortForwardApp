@@ -97,7 +97,7 @@ func LoadConfig(path string, portableDir string) (*ResolvedConfig, error) {
 func resolveConfig(raw Config, portableDir string) (*ResolvedConfig, error) {
 	hostname := strings.TrimSpace(raw.Hostname)
 	if hostname == "" {
-		hostname = "gtsa"
+		hostname = "tspfa"
 	}
 
 	stateRoot := strings.TrimSpace(raw.StateDir)

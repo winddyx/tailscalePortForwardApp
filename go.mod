@@ -1,4 +1,4 @@
-module gtsa
+module tspfa
 
 go 1.26
 

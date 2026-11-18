@@ -7,6 +7,7 @@ dist/
 # Test portable runtimes
 .portable-test/
 portable/
+tspfa-*/
 gtsa-*/
 tailscaled/
 state/

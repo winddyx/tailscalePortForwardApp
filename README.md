@@ -1,4 +1,4 @@
-# gtsa
+# tspfa
 
 基于 Tailscale `tsnet` 的无 TUN 多用户端口转发代理工具。
 
@@ -32,8 +32,8 @@
 ## 便携包运行目录布局
 
 ```text
-my-nas-gtsa/
-├── gtsa (或 gtsa-linux-amd64)
+my-nas-tspfa/
+├── tspfa (或 tspfa-linux-amd64)
 ├── config.json
 └── state/
     ├── user1/
@@ -68,7 +68,7 @@ my-nas-gtsa/
 
 ### 字段说明
 
-- `hostname`：所有用户节点共用的 Tailscale 设备名（默认 `gtsa`）。
+- `hostname`：所有用户节点共用的 Tailscale 设备名（默认 `tspfa`）。
 - `state_dir`：状态根目录，相对路径基于可执行文件所在目录解析（默认 `state`）。
 - `control_url`：全局默认控制服务器地址（留空使用官方 Tailscale，可填写 Headscale 地址）。
 - `verbose`：是否输出详细的 Tailscale 底层调试日志。
@@ -85,13 +85,13 @@ my-nas-gtsa/
 将可执行文件与 `config.json` 放在同一目录后直接启动：
 
 ```bash
-./gtsa
+./tspfa
 ```
 
 或显式指定配置文件路径：
 
 ```bash
-./gtsa -config /path/to/config.json
+./tspfa -config /path/to/config.json
 ```
 
 ## 构建与测试
@@ -103,19 +103,19 @@ make test
 # 本地编译
 make build
 
-# 全量多平台发布打包（先清理 dist/，生成二进制、config.json、gtsa.service、compose.yml 与 SHA256SUMS）
+# 全量多平台发布打包（先清理 dist/，生成二进制、config.json、tspfa.service、compose.yml 与 SHA256SUMS）
 make dist
 ```
 
 ### systemd 守护进程部署（Linux）
 
-`make dist` 会在 `dist/` 目录生成通用 `gtsa.service` 模板（默认工作目录为 `/opt/gtsa`），部署时将对应架构二进制重命名为 `gtsa` 并与 `config.json` 一同放入 `/opt/gtsa` 后启用即可：
+`make dist` 会在 `dist/` 目录生成通用 `tspfa.service` 模板（默认工作目录为 `/opt/tspfa`），部署时将对应架构二进制重命名为 `tspfa` 并与 `config.json` 一同放入 `/opt/tspfa` 后启用即可：
 
 ```bash
-sudo mkdir -p /opt/gtsa
-sudo cp gtsa-linux-amd64 /opt/gtsa/gtsa
-sudo cp config.json /opt/gtsa/config.json
-sudo cp gtsa.service /etc/systemd/system/gtsa.service
+sudo mkdir -p /opt/tspfa
+sudo cp tspfa-linux-amd64 /opt/tspfa/tspfa
+sudo cp config.json /opt/tspfa/config.json
+sudo cp tspfa.service /etc/systemd/system/tspfa.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now gtsa
+sudo systemctl enable --now tspfa
 ```

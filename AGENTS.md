@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`gtsa` is a pure user-space, no-TUN, multi-user Tailscale TCP port-forwarding proxy driven by `config.json`. Each configured user in `users` runs an independent `tsnet.Server` instance in its own tailnet, shares the configured `hostname`, obtains its own Tailscale IP, and forwards configured ports to the target (default `127.0.0.1:<port>`).
+`tspfa` is a pure user-space, no-TUN, multi-user Tailscale TCP port-forwarding proxy driven by `config.json`. Each configured user in `users` runs an independent `tsnet.Server` instance in its own tailnet, shares the configured `hostname`, obtains its own Tailscale IP, and forwards configured ports to the target (default `127.0.0.1:<port>`).
 
 - Branch `v1`: legacy single-user CLI implementation.
 - Branch `main`: current multi-user, config-file-only implementation.
@@ -14,7 +14,7 @@
 - `src/node.go`: single-user `tsnet.Server` startup, authentication, and Tailscale IP discovery.
 - `src/forwarder.go`: port listener and `pipeBridge` TCP forwarding.
 - `src/main_test.go`: unit tests.
-- `config.json`, `gtsa.service`, & `compose.yml`: default config, systemd unit, and Docker Compose templates packaged into `dist/`.
+- `config.json`, `tspfa.service`, & `compose.yml`: default config, systemd unit, and Docker Compose templates packaged into `dist/`.
 - `Makefile`: build, test, and `dist` packaging targets.
 
 ## Workspace & Go Environment
@@ -28,7 +28,7 @@
 
 - Run unit tests: `make test`
 - Build local binary: `make build`
-- Build release artifacts: `make dist` (cleans `dist/` first, compiles `darwin-arm64`, `linux-amd64`, `linux-arm64`, `windows-amd64`, copies `config.json`, `gtsa.service`, and `compose.yml`, and generates `SHA256SUMS`).
+- Build release artifacts: `make dist` (cleans `dist/` first, compiles `darwin-arm64`, `linux-amd64`, `linux-arm64`, `windows-amd64`, copies `config.json`, `tspfa.service`, and `compose.yml`, and generates `SHA256SUMS`).
 
 ## Design Invariants
 

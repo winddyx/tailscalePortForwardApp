@@ -1,12 +1,12 @@
 [Unit]
-Description=gtsa Tailscale Multi-User Port Forwarder
+Description=tspfa Tailscale Multi-User Port Forwarder
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/gtsa
-ExecStart=/opt/gtsa/gtsa -config /opt/gtsa/config.json
+WorkingDirectory=/opt/tspfa
+ExecStart=/opt/tspfa/tspfa -config /opt/tspfa/config.json
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536
