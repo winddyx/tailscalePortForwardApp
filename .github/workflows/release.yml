@@ -1,0 +1,53 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests
+        run: make test
+
+      - name: Build release artifacts
+        run: make dist
+
+      - name: Resolve tsnet version
+        id: version
+        run: |
+          TS_VER=$(tr -d '[:space:]' < vendor/tailscale.com/VERSION.txt 2>/dev/null || true)
+          if [ -z "$TS_VER" ]; then
+            TS_VER=$(awk '/^require tailscale\.com / {print $3; exit}' go.mod | sed 's/^v//')
+          fi
+          TAG="v${TS_VER#v}"
+          echo "ts_version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: tspfa (${{ steps.version.outputs.ts_version }})
+          body: |
+            tsnet (tailscale.com) version: ${{ steps.version.outputs.ts_version }}
+          files: |
+            dist/tspfa-*
+            dist/config.json
+            dist/tspfa.service
+            dist/compose.yml
+            dist/SHA256SUMS
