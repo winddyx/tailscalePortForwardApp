@@ -119,3 +119,7 @@ sudo cp tspfa.service /etc/systemd/system/tspfa.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now tspfa
 ```
+
+## 开源协议
+
+本项目采用 [MIT License](LICENSE) 开源。核心依赖 `tailscale.com` 采用 BSD 3-Clause License。
