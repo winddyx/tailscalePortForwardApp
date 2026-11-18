@@ -5,8 +5,10 @@
 dist/
 
 # Test portable runtimes
-.protable-test/
+.portable-test/
 portable/
+gtsa-*/
+tailscaled/
 
 # System
 .DS_Store

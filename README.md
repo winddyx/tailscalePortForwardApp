@@ -1,4 +1,4 @@
-# pfgots
+# gtsa
 
 基于 Tailscale `tsnet` 的无 TUN 端口转发 CLI 工具。
 
@@ -16,7 +16,7 @@
 
 ```text
 .
-├── pfgots                  # 编译生成的 CLI 二进制文件
+├── gtsa                    # 编译生成的 CLI 二进制文件
 ├── src/                    # 源码目录
 │   ├── main.go             # 核心实现
 │   └── main_test.go        # 单元测试
@@ -31,7 +31,7 @@
 
 ```text
 my-portable-dir/
-├── pfgots (或 pfgots-darwin-arm64)   # 可执行文件
+├── gtsa (或 gtsa-darwin-arm64)       # 可执行文件
 ├── config.json                       # 配置文件（自动保存或手动指定）
 └── tailscaled/                       # Tailscale 机器凭据与状态目录
     ├── tailscaled.state              # 节点状态与私钥凭证
@@ -40,10 +40,11 @@ my-portable-dir/
 
 ## 使用方法
 
-### 1. 基础端口转发（如 SMB 445）
+### 1. 基础端口转发（如 SMB 445 或多端口 80,443）
 
 ```bash
-./pfgots -p 445
+./gtsa -p 445
+./gtsa -p 80,443
 ```
 
 首次运行终端将输出类似如下信息：
@@ -51,7 +52,7 @@ my-portable-dir/
 ```text
 [INFO] Portable directory: /path/to/my-portable-dir
 [INFO] Tailscale state directory: /path/to/my-portable-dir/tailscaled
-[INFO] Starting Tailscale node 'pfgots-445'...
+[INFO] Starting Tailscale node 'gtsa-445'...
 [TAILSCALE] LocalBackend state is NeedsLogin; running StartLoginInteractive...
 
 ================================================================================
@@ -64,7 +65,7 @@ https://login.tailscale.com/a/xxxxxx
 
 ```text
 ==================================================
-Tailscale Node: pfgots-445.tailscale.net
+Tailscale Node: gtsa-445.tailscale.net
 Tailscale IPv4: 100.x.y.z
 Tailscale IPv6: fd7a:115c:xxxx::xxxx
 Forwarding:     [Tailscale]:445 -> 127.0.0.1:445
@@ -77,15 +78,15 @@ Forwarding:     [Tailscale]:445 -> 127.0.0.1:445
 ### 2. 命令行参数
 
 ```text
-Usage: pfgots -p <port> [options]
+Usage: gtsa -p <port> [options]
 
 Options:
-  -p, -port <int>
-        指定转发端口（例如 445，必填或在 config.json 中配置）
+  -p, -port <string>
+        指定转发端口，支持逗号分隔多个端口（例如 445 或 80,443；设为 0 则转发本地全部端口）
   -target <string>
-        本地转发目标地址（默认 127.0.0.1:<port>）
+        本地转发目标地址或主机（默认 127.0.0.1:<port>，端口为 0 或多端口时默认 127.0.0.1）
   -name, -hostname <string>
-        Tailscale 节点名称（默认 pfgots-<port>）
+        Tailscale 节点名称（默认 gtsa-<port>，多端口为 gtsa-<p1>-<p2>，端口为 0 时默认 gtsa-all）
   -dir <string>
         Portable 目录路径（默认可执行文件所在目录）
   -authkey <string>
@@ -104,11 +105,11 @@ Options:
 {
   "port": 445,
   "target": "127.0.0.1:445",
-  "hostname": "pfgots-445"
+  "hostname": "gtsa-445"
 }
 ```
 
-配置后可直接执行 `./pfgots` 启动。命令行参数优先级高于配置文件。
+配置后可直接执行 `./gtsa` 启动。命令行参数优先级高于配置文件。
 
 ## 构建与测试
 

@@ -1,4 +1,4 @@
-APP_NAME := pfgots
+APP_NAME := gtsa
 DIST_DIR := dist
 TMP_DIR := $(CURDIR)/.tmp
 
@@ -32,7 +32,7 @@ dist:
 	$(MAKE) dist-linux-amd64
 	$(MAKE) dist-linux-arm64
 	$(MAKE) dist-windows-amd64
-	@cd $(DIST_DIR) && shasum -a 256 * > SHA256SUMS
+	@cd $(DIST_DIR) && shasum -a 256 $(APP_NAME)-* > SHA256SUMS
 
 dist-darwin-arm64:
 	@mkdir -p $(DIST_DIR) $(TMP_DIR)

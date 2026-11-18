@@ -1,4 +1,4 @@
-module pfgots
+module gtsa
 
 go 1.26
 
