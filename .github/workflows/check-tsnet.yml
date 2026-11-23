@@ -49,6 +49,12 @@ jobs:
           go mod tidy
           go mod vendor
 
+      - name: Setup updated Go
+        if: steps.check.outputs.updated == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Run unit tests
         if: steps.check.outputs.updated == 'true'
         run: make test
