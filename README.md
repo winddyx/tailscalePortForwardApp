@@ -120,6 +120,32 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now tspfa
 ```
 
+### Linux 一键检查与更新脚本（`update.sh`）
+
+将 [update.sh](update.sh) 放入部署目录（例如 `/opt/tspfa` 或 Docker Compose 目录）后直接执行：
+
+```bash
+chmod +x update.sh
+./update.sh
+```
+
+脚本会自动完成以下步骤：
+
+1. 查询 GitHub Releases 最新版本，结合 `.version` 与 `SHA256SUMS` 校验本地二进制是否需要更新。
+2. 按当前系统架构（`amd64` / `arm64`）下载对应二进制并校验 SHA256。
+3. 备份旧文件为 `.bak` 并原子替换本地二进制（自动识别目录中的 `tspfa` 或 `tspfa-linux-<arch>`）。
+4. 自动识别部署方式并重启服务：目录存在 `compose.yml` / `docker-compose.yml` 时执行 `docker compose restart`；否则若存在 `tspfa.service` 则执行 `systemctl restart tspfa`。
+
+常用环境变量覆盖示例：
+
+```bash
+# 指定目标目录或强制更新
+APP_DIR=/opt/tspfa FORCE=1 ./update.sh
+
+# 显式指定运行模式（auto / systemd / compose / none）与下载代理前缀
+MODE=systemd GITHUB_PROXY=https://gh-proxy.com/ ./update.sh
+```
+
 ## 开源协议
 
 本项目采用 [MIT License](LICENSE) 开源。核心依赖 `tailscale.com` 采用 BSD 3-Clause License。

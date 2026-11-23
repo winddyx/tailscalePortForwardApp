@@ -50,4 +50,5 @@ jobs:
             dist/config.json
             dist/tspfa.service
             dist/compose.yml
+            dist/update.sh
             dist/SHA256SUMS

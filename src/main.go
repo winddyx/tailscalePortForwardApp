@@ -10,11 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
+	"time"
 
 	_ "tailscale.com/feature/useproxy"
 	"tailscale.com/net/netns"
+)
+
+const (
+	retryInitialBackoff = 5 * time.Second
+	retryMaxBackoff     = 60 * time.Second
+	retryResetWindow    = 1 * time.Minute
 )
 
 func main() {
@@ -78,25 +84,63 @@ func main() {
 	}()
 
 	var wg sync.WaitGroup
-	var errCount atomic.Int32
 
 	for _, user := range cfg.Users {
 		wg.Add(1)
 		go func(u ResolvedUser) {
 			defer wg.Done()
-			if err := runUserNode(ctx, cfg.Hostname, u, cfg.Verbose); err != nil {
-				errCount.Add(1)
-				log.Printf("[user:%s] [ERROR] %v", u.Name, err)
-			}
+			runUserNodeWithRetry(ctx, u.Name, retryInitialBackoff, retryMaxBackoff, retryResetWindow, func(runCtx context.Context) error {
+				return runUserNode(runCtx, cfg.Hostname, u, cfg.Verbose)
+			})
 		}(user)
 	}
 
 	wg.Wait()
-
-	if ctx.Err() == nil && int(errCount.Load()) == len(cfg.Users) {
-		log.Fatalf("[FATAL] all %d Tailscale node(s) failed", len(cfg.Users))
-	}
 	log.Println("[INFO] All Tailscale nodes stopped")
+}
+
+func runUserNodeWithRetry(
+	ctx context.Context,
+	userName string,
+	initialBackoff time.Duration,
+	maxBackoff time.Duration,
+	resetWindow time.Duration,
+	run func(context.Context) error,
+) {
+	if initialBackoff <= 0 {
+		initialBackoff = time.Second
+	}
+	if maxBackoff < initialBackoff {
+		maxBackoff = initialBackoff
+	}
+
+	backoff := initialBackoff
+	for {
+		start := time.Now()
+		err := run(ctx)
+		if ctx.Err() != nil || err == nil {
+			return
+		}
+
+		if resetWindow > 0 && time.Since(start) >= resetWindow {
+			backoff = initialBackoff
+		}
+
+		log.Printf("[user:%s] [ERROR] %v; retrying in %s...", userName, err, backoff)
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
 }
 
 func resolvePortableDir() (string, error) {

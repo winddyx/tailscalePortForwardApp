@@ -34,6 +34,8 @@ dist:
 	cp config.json $(DIST_DIR)/config.json
 	cp tspfa.service $(DIST_DIR)/tspfa.service
 	cp compose.yml $(DIST_DIR)/compose.yml
+	cp update.sh $(DIST_DIR)/update.sh
+	chmod +x $(DIST_DIR)/update.sh
 	@cd $(DIST_DIR) && shasum -a 256 $(APP_NAME)-* > SHA256SUMS
 
 dist-darwin-arm64:

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -280,11 +283,11 @@ func TestIsTempDir(t *testing.T) {
 	if !isTempDir("/tmp/go-build123") {
 		t.Error("expected /tmp/go-build123 to be detected as temp dir")
 	}
-	if !isTempDir("/Users/mod/workspace/goTailscaleApp/.tmp/bin") {
+	if !isTempDir("/workspace/tspfa/.tmp/bin") {
 		t.Error("expected .tmp path to be detected as temp dir")
 	}
-	if isTempDir("/opt/gtsa-portable") {
-		t.Error("did not expect /opt/gtsa-portable to be detected as temp dir")
+	if isTempDir("/opt/tspfa") {
+		t.Error("did not expect /opt/tspfa to be detected as temp dir")
 	}
 }
 
@@ -341,5 +344,81 @@ func TestPipeBridge(t *testing.T) {
 		if err := <-errCh; err != nil {
 			t.Fatalf("goroutine error: %v", err)
 		}
+	}
+}
+
+func TestRunUserNodeWithRetryRecoversAfterTransientErrors(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var attempts atomic.Int32
+	runUserNodeWithRetry(ctx, "alice", 10*time.Millisecond, 40*time.Millisecond, time.Minute, func(context.Context) error {
+		n := attempts.Add(1)
+		if n < 3 {
+			return errors.New("transient network error")
+		}
+		return nil
+	})
+
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts before recovery, got %d", got)
+	}
+}
+
+func TestRunUserNodeWithRetryStopsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var attempts atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		runUserNodeWithRetry(ctx, "bob", 5*time.Second, 10*time.Second, time.Minute, func(context.Context) error {
+			if attempts.Add(1) == 1 {
+				go func() {
+					time.Sleep(20 * time.Millisecond)
+					cancel()
+				}()
+			}
+			return errors.New("persistent error")
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("runUserNodeWithRetry did not exit promptly after context cancel")
+	}
+
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("expected 1 attempt before cancel during backoff, got %d", got)
+	}
+}
+
+func TestRunUserNodeWithRetryResetsBackoffAfterStableRun(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var attempts atomic.Int32
+	start := time.Now()
+	runUserNodeWithRetry(ctx, "carol", 10*time.Millisecond, 500*time.Millisecond, 25*time.Millisecond, func(context.Context) error {
+		switch attempts.Add(1) {
+		case 1:
+			// Short failure: next backoff becomes 20ms.
+			return errors.New("quick fail")
+		case 2:
+			// Stable run >= resetWindow (25ms): backoff should reset to 10ms instead of 20ms/40ms.
+			time.Sleep(30 * time.Millisecond)
+			return errors.New("late fail")
+		default:
+			return nil
+		}
+	})
+
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts, got %d", got)
+	}
+	// Total elapsed should be roughly 10ms + 30ms + 10ms = ~50ms, well below 200ms.
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("expected backoff to reset after stable run, took %s", elapsed)
 	}
 }
